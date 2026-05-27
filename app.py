@@ -114,17 +114,28 @@ def admin_dashboard():
 
     conn = sqlite3.connect('inventario_papichis.db')
     cursor = conn.cursor()
-    # Incluimos el ID al inicio de la consulta para poder usarlo en los formularios mutables
     cursor.execute("SELECT id, nombre_producto, categoria, cantidad_actual, precio_venta, precio_compra, ultima_actualizacion FROM productos ORDER BY cantidad_actual ASC")
-    datos = cursor.fetchall()
+    datos_brutos = cursor.fetchall()
     conn.close()
 
-    # --- ZONA DE CÁLCULOS ANALÍTICOS (PRO) ---
+    # --- LIMPIEZA DE DATOS (ANTI ERROR 500) ---
+    datos = []
+    for p in datos_brutos:
+        id_prod, nombre, cat, cant, p_venta, p_compra, ult_act = p
+        
+        cant = int(cant) if cant else 0
+        # Forzar a que el precio sea decimal. Si falla (está vacío o es texto), poner 0.0
+        try:
+            p_venta = float(p_venta) if p_venta else 0.0
+        except ValueError:
+            p_venta = 0.0
+            
+        datos.append((id_prod, nombre, cat, cant, p_venta, p_compra, ult_act))
+
+    # --- ZONA DE CÁLCULOS ANALÍTICOS ---
     total_items = len(datos)
     total_unidades = sum(p[3] for p in datos)
     items_criticos = sum(1 for p in datos if p[3] <= 5)
-    
-    # Cálculo del valor total de la mercancía basada en el precio de venta
     valor_total_mercancia = sum(p[3] * p[4] for p in datos)
 
     html = """
@@ -141,7 +152,6 @@ def admin_dashboard():
             .btn-excel { background-color: #28a745; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
             .btn-excel:hover { background-color: #218838; }
             
-            /* Contenedor de Tarjetas Analíticas (KPIs) */
             .contenedor-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 25px; }
             .tarjeta-kpi { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-left: 5px solid #1f497d; }
             .tarjeta-kpi.alerta { border-left-color: #dc3545; }
@@ -155,7 +165,6 @@ def admin_dashboard():
             tr:hover { background-color: #f1f3f5; }
             .agotado { background-color: #ffe6e6; color: #cc0000; font-weight: bold; }
             
-            /* Estilo para el miniformulario de edición de precios */
             .form-precio { display: flex; gap: 4px; align-items: center; margin: 0; }
             .input-precio { width: 75px; padding: 6px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; text-align: center; }
             .btn-guardar-precio { background: #28a745; color: white; border: none; padding: 6px 10px; border-radius: 4px; font-weight: bold; cursor: pointer; }
@@ -239,7 +248,14 @@ def admin_actualizar_precio():
         return redirect(url_for('admin_login'))
         
     producto_id = request.form['id_producto']
-    nuevo_precio = request.form['nuevo_precio']
+    nuevo_precio_str = request.form['nuevo_precio']
+    
+    # Limpieza: Si el input viene vacío, lo convertimos a 0.0 para no romper la BD
+    try:
+        nuevo_precio = float(nuevo_precio_str)
+    except ValueError:
+        nuevo_precio = 0.0
+
     fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     conn = sqlite3.connect('inventario_papichis.db')
@@ -264,11 +280,21 @@ def descargar_excel():
     conn = sqlite3.connect('inventario_papichis.db')
     cursor = conn.cursor()
     cursor.execute("SELECT id, categoria, subcategoria, nombre_producto, cantidad_actual, precio_venta, precio_compra, ultima_actualizacion FROM productos")
-    productos_bd = cursor.fetchall()
+    productos_bd_brutos = cursor.fetchall()
     conn.close()
 
+    # Limpieza también para el Excel
+    productos_bd = []
+    for f in productos_bd_brutos:
+        id_prod, cat, subcat, name, qty, p_venta, p_compra, last_rev = f
+        qty = int(qty) if qty else 0
+        try:
+            p_venta = float(p_venta) if p_venta else 0.0
+        except ValueError:
+            p_venta = 0.0
+        productos_bd.append((id_prod, cat, subcat, name, qty, p_venta, p_compra, last_rev))
+
     wb = openpyxl.Workbook()
-    
     ws_summary = wb.active
     ws_summary.title = "Resumen Financiero"
     ws_data = wb.create_sheet(title="Inventario Valorizado")
@@ -276,7 +302,6 @@ def descargar_excel():
     ws_summary.views.sheetView[0].showGridLines = True
     ws_data.views.sheetView[0].showGridLines = True
 
-    # Estilos Ejecutivos
     fill_header = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
     fill_sub_header = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
     fill_zebra = PatternFill(start_color="F2F5F9", end_color="F2F5F9", fill_type="solid")
@@ -291,7 +316,6 @@ def descargar_excel():
     border_thin = Border(left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'), top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9'))
     border_total = Border(top=Side(style='thin', color='000000'), bottom=Side(style='double', color='000000'))
 
-    # --- PESTAÑA 2: INVENTARIO VALORIZADO ---
     ws_data.append([])
     ws_data.append(["REPORTE FINANCIERO DE INVENTARIO VALORIZADO"])
     ws_data.cell(row=2, column=1).font = font_title
@@ -352,7 +376,6 @@ def descargar_excel():
     rule = CellIsRule(operator='equal', formula=['"CRÍTICO"'], fill=fill_alert, font=font_alert)
     ws_data.conditional_formatting.add(f"H5:H{tot_row-1}", rule)
 
-    # --- PESTAÑA 1: RESUMEN FINANCIERO ---
     ws_summary.append([])
     ws_summary.append(["SISTEMA DE CONTROL DE INVENTARIO - PAPICHIS"])
     ws_summary.cell(row=2, column=2).font = font_title
