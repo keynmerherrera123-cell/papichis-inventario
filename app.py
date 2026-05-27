@@ -10,11 +10,10 @@ from openpyxl.utils import get_column_letter
 from openpyxl.formatting.rule import CellIsRule
 
 app = Flask(__name__)
-# La clave secreta es necesaria para que las sesiones funcionen de forma segura
 app.secret_key = 'clave_secreta_super_segura_papichis'
 
 
-# --- ZONA DE TRABAJADORES (Vista Móvil) ---
+# --- ZONA DE TRABAJADORES (Vista Móvil Básica) ---
 
 @app.route('/')
 def mostrar_inventario():
@@ -81,19 +80,18 @@ def actualizar_inventario():
     return redirect(url_for('mostrar_inventario'))
 
 
-# --- ZONA DE ADMINISTRACIÓN (Dashboard y Seguridad) ---
+# --- ZONA DE ADMINISTRACIÓN (Dashboard con Analíticas Avanzadas) ---
 
 @app.route('/admin', methods=['GET', 'POST'])
 def admin_login():
     if request.method == 'POST':
         clave = request.form.get('clave')
         if clave == 'papichis2026':
-            session['admin_autenticado'] = True  # Guardamos el estado en la sesión
+            session['admin_autenticado'] = True
             return redirect(url_for('admin_dashboard'))
         else:
             return "<h2 style='color:red; text-align:center;'>Contraseña incorrecta. <a href='/admin'>Volver</a></h2>"
     
-    # Si es GET, mostramos el login
     html = """
     <!DOCTYPE html>
     <html>
@@ -111,90 +109,139 @@ def admin_login():
 
 @app.route('/admin/dashboard')
 def admin_dashboard():
-    # Verificación de seguridad por sesión
     if not session.get('admin_autenticado'):
         return redirect(url_for('admin_login'))
 
     conn = sqlite3.connect('inventario_papichis.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT nombre_producto, categoria, cantidad_actual, ultima_actualizacion FROM productos ORDER BY cantidad_actual ASC")
+    # Traemos también los precios que agregamos
+    cursor.execute("SELECT nombre_producto, categoria, cantidad_actual, precio_venta, precio_compra, ultima_actualizacion FROM productos ORDER BY cantidad_actual ASC")
     datos = cursor.fetchall()
     conn.close()
+
+    # --- ZONA DE CÁLCULOS ANALÍTICOS (PRO) ---
+    total_items = len(datos)
+    total_unidades = sum(p[2] for p in datos)
+    items_criticos = sum(1 for p in datos if p[2] <= 5)
+    
+    # Cálculo del valor total de la mercancía basada en el precio de venta
+    valor_total_mercancia = sum(p[2] * p[3] for p in datos)
 
     html = """
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>Dashboard Papichis</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Dashboard Analítico Papichis</title>
         <style>
-            body { font-family: Arial; padding: 20px; background: #fff; }
-            .encabezado { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #333; padding-bottom: 10px; }
-            h2 { margin: 0; color: #333; }
-            .btn-excel { background-color: #1f497d; color: white; text-decoration: none; padding: 10px 20px; border-radius: 5px; font-weight: bold; font-size: 14px; }
-            .btn-excel:hover { background-color: #102a4a; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-            th { background-color: #f4f4f4; }
+            body { font-family: Arial, sans-serif; padding: 20px; background: #f8f9fa; color: #333; margin: 0; }
+            .encabezado { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #1f497d; padding-bottom: 15px; margin-bottom: 20px; }
+            h2 { margin: 0; color: #1f497d; }
+            .btn-excel { background-color: #28a745; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            .btn-excel:hover { background-color: #218838; }
+            
+            /* Contenedor de Tarjetas Analíticas (KPIs) */
+            .contenedor-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 25px; }
+            .tarjeta-kpi { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-left: 5px solid #1f497d; }
+            .tarjeta-kpi.alerta { border-left-color: #dc3545; }
+            .tarjeta-kpi.dinero { border-left-color: #28a745; }
+            .kpi-titulo { font-size: 12px; text-transform: uppercase; color: #777; font-weight: bold; margin-bottom: 5px; }
+            .kpi-valor { font-size: 24px; font-weight: bold; color: #222; }
+            
+            table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 8px; overflow: hidden; }
+            th, td { padding: 14px; text-align: left; border-bottom: 1px solid #eee; }
+            th { background-color: #1f497d; color: white; font-weight: bold; }
+            tr:hover { background-color: #f1f3f5; }
             .agotado { background-color: #ffe6e6; color: #cc0000; font-weight: bold; }
         </style>
     </head>
     <body>
         <div class="encabezado">
-            <h2>📊 Panel de Reportes - Papichis</h2>
-            <a href="/descargar_excel" class="btn-excel">📥 Descargar Reporte (Excel)</a>
+            <h2>📊 Panel de Inteligencia de Negocio - Papichis</h2>
+            <a href="/descargar_excel" class="btn-excel">📥 Descargar Reporte Financiero (Excel)</a>
         </div>
-        <p>Vista de solo lectura para auditoría. Los productos en rojo necesitan reposición urgente.</p>
+        
+        <div class="contenedor-kpis">
+            <div class="tarjeta-kpi">
+                <div class="kpi-titulo">Modelos Registrados</div>
+                <div class="kpi-valor">{{ total_items }}</div>
+            </div>
+            <div class="tarjeta-kpi">
+                <div class="kpi-titulo">Total Unidades Físicas</div>
+                <div class="kpi-valor">{{ total_unidades }}</div>
+            </div>
+            <div class="tarjeta-kpi dinero">
+                <div class="kpi-titulo">Valor Estimado de Venta</div>
+                <div class="kpi-valor">${{ "{:,.2f}".format(valor_total_mercancia) }}</div>
+            </div>
+            <div class="tarjeta-kpi alerta">
+                <div class="kpi-titulo">Alertas de Reposición</div>
+                <div class="kpi-valor" style="color: {% if items_criticos > 0 %}#dc3545{% else %}\#222{% endif %};">{{ items_criticos }}</div>
+            </div>
+        </div>
+
+        <p style="color: #555; margin-bottom: 15px;">Auditoría de almacén en tiempo real. Los valores se recalculan dinámicamente con cada cambio.</p>
         
         <table>
-            <tr>
-                <th>Producto</th>
-                <th>Categoría</th>
-                <th>Stock Actual</th>
-                <th>Última Revisión</th>
-            </tr>
-            {% for producto in datos %}
-            <tr class="{% if producto[2] <= 5 %}agotado{% endif %}">
-                <td>{{ producto[0] }}</td>
-                <td>{{ producto[1] }}</td>
-                <td>{{ producto[2] }}</td>
-                <td>{{ producto[3] or 'No revisado aún' }}</td>
-            </tr>
-            {% endfor %}
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th>Categoría</th>
+                    <th>Stock Actual</th>
+                    <th>Precio de Venta</th>
+                    <th>Valor en Stock</th>
+                    <th>Última Revisión</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for producto in datos %}
+                <tr class="{% if producto[2] <= 5 %}agotado{% endif %}">
+                    <td>{{ producto[0] }}</td>
+                    <td>{{ producto[1] }}</td>
+                    <td>{{ producto[2] }} uds</td>
+                    <td>${{ "{:,.2f}".format(producto[3]) }}</td>
+                    <td>${{ "{:,.2f}".format(producto[2] * producto[3]) }}</td>
+                    <td>{{ producto[5] or 'No revisado aún' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
         </table>
         <br>
-        <a href="/admin/logout" style="color: red; text-decoration: none; font-size: 14px;">Cerrar Sesión Administrador</a>
+        <div style="display: flex; justify-content: space-between;">
+            <span style="font-size: 12px; color: #777;">* Nota: El margen neto se habilitará al ingresar costos de proveedores.</span>
+            <a href="/admin/logout" style="color: #dc3545; text-decoration: none; font-weight: bold; font-size: 14px;">Cerrar Sesión</a>
+        </div>
     </body>
     </html>
     """
-    return render_template_string(html, datos=datos)
+    return render_template_string(html, datos=datos, total_items=total_items, total_unidades=total_unidades, valor_total_mercancia=valor_total_mercancia, items_criticos=items_criticos)
 
 
-# --- RUTA DE GENERACIÓN EN TIEMPO REAL DEL EXCEL ---
+# --- RUTA DE GENERACIÓN EN TIEMPO REAL DEL EXCEL FINANCIERO ---
 
 @app.route('/descargar_excel')
 def descargar_excel():
     if not session.get('admin_autenticado'):
         return redirect(url_for('admin_login'))
 
-    # 1. Leer los datos más frescos de la BD
     conn = sqlite3.connect('inventario_papichis.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT id, categoria, subcategoria, nombre_producto, cantidad_actual, ultima_actualizacion FROM productos")
+    # Traemos los nuevos campos financieros para el reporte
+    cursor.execute("SELECT id, categoria, subcategoria, nombre_producto, cantidad_actual, precio_venta, precio_compra, ultima_actualizacion FROM productos")
     productos_bd = cursor.fetchall()
     conn.close()
 
-    # 2. Inicializar el libro de Excel en memoria RAM (No creamos archivos basura en el disco)
     wb = openpyxl.Workbook()
     
     ws_summary = wb.active
-    ws_summary.title = "Resumen Ejecutivo"
-    ws_data = wb.create_sheet(title="Inventario Detallado")
+    ws_summary.title = "Resumen Financiero"
+    ws_data = wb.create_sheet(title="Inventario Valorizado")
     
     ws_summary.views.sheetView[0].showGridLines = True
     ws_data.views.sheetView[0].showGridLines = True
 
-    # Estilos del Diseño Corporativo
+    # Estilos Ejecutivos
     fill_header = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
     fill_sub_header = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
     fill_zebra = PatternFill(start_color="F2F5F9", end_color="F2F5F9", fill_type="solid")
@@ -209,71 +256,81 @@ def descargar_excel():
     border_thin = Border(left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'), top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9'))
     border_total = Border(top=Side(style='thin', color='000000'), bottom=Side(style='double', color='000000'))
 
-    # --- PESTAÑA 2: INVENTARIO DETALLADO ---
+    # --- PESTAÑA 2: INVENTARIO VALORIZADO ---
     ws_data.append([])
-    ws_data.append(["REPORTE DE INVENTARIO DETALLADO - PAPICHIS"])
+    ws_data.append(["REPORTE FINANCIERO DE INVENTARIO VALORIZADO"])
     ws_data.cell(row=2, column=1).font = font_title
     ws_data.append([])
     
-    headers = ["ID", "Categoría", "Subcategoría", "Producto", "Stock Actual", "Estado Alerta", "Última Revisión"]
+    headers = ["ID", "Categoría", "Subcategoría", "Producto", "Stock", "P. Venta", "Valor Inventario", "Estado Alerta", "Última Revisión"]
     ws_data.append(headers)
     
     for col_num, h in enumerate(headers, 1):
         c = ws_data.cell(row=4, column=col_num)
         c.font = font_header
         c.fill = fill_header
-        c.alignment = Alignment(horizontal='center' if col_num in [1,5,6,7] else 'left', vertical='center')
+        c.alignment = Alignment(horizontal='center' if col_num in [1,5,6,7,8,9] else 'left', vertical='center')
 
     start_row = 5
     for idx, fila in enumerate(productos_bd, 1):
         r_num = start_row + idx - 1
-        _, cat, subcat, name, qty, last_rev = fila
+        _, cat, subcat, name, qty, p_venta, p_compra, last_rev = fila
         
-        # Truco: Calculamos los datos estáticos directamente con Python
         estado_alerta = "CRÍTICO" if qty <= 5 else "OK"
+        valor_stock = qty * p_venta
         revision_texto = last_rev if last_rev else datetime.now().strftime("%Y-%m-%d %H:%M")
         
-        ws_data.append([idx, cat, subcat, name, qty, estado_alerta, revision_texto])
+        ws_data.append([idx, cat, subcat, name, qty, p_venta, valor_stock, estado_alerta, revision_texto])
         
-        for col_idx in range(1, 8):
+        for col_idx in range(1, 10):
             cell = ws_data.cell(row=r_num, column=col_idx)
             cell.font = font_regular
             cell.border = border_thin
             if r_num % 2 == 0:
                 cell.fill = fill_zebra
             
-            cell.alignment = Alignment(horizontal='center' if col_idx in [1,5,6,7] else 'left', vertical='center')
+            cell.alignment = Alignment(horizontal='center' if col_idx in [1,5,6,7,8,9] else 'left', vertical='center')
+            
+            # Formatos numéricos de moneda y millares
             if col_idx == 5:
                 cell.number_format = '#,##0'
+            elif col_idx in [6, 7]:
+                cell.number_format = '$#,##0.00'
 
     tot_row = start_row + len(productos_bd)
-    ws_data.cell(row=tot_row, column=4, value="Total Productos en Stock").font = font_bold
+    ws_data.cell(row=tot_row, column=4, value="Totales Consolidados").font = font_bold
     ws_data.cell(row=tot_row, column=4).alignment = Alignment(horizontal='right')
     
-    # Aquí calculamos la suma total en Python para saltarnos el bloqueo de la Vista Protegida de Excel
     suma_total_stock = sum(f[4] for f in productos_bd)
+    suma_total_dinero = sum(f[4] * f[5] for f in productos_bd)
     items_criticos = sum(1 for f in productos_bd if f[4] <= 5)
     
-    total_cell = ws_data.cell(row=tot_row, column=5, value=suma_total_stock)
-    total_cell.font = font_bold
-    total_cell.alignment = Alignment(horizontal='center')
-    total_cell.border = border_total
+    # Celda total stock
+    t_stock = ws_data.cell(row=tot_row, column=5, value=suma_total_stock)
+    t_stock.font = font_bold
+    t_stock.border = border_total
+    t_stock.number_format = '#,##0'
+    
+    # Celda total dinero
+    t_dinero = ws_data.cell(row=tot_row, column=7, value=suma_total_dinero)
+    t_dinero.font = font_bold
+    t_dinero.border = border_total
+    t_dinero.number_format = '$#,##0.00'
 
-    # Formato condicional para la columna de alertas
     rule = CellIsRule(operator='equal', formula=['"CRÍTICO"'], fill=fill_alert, font=font_alert)
-    ws_data.conditional_formatting.add(f"F5:F{tot_row-1}", rule)
+    ws_data.conditional_formatting.add(f"H5:H{tot_row-1}", rule)
 
-    # --- PESTAÑA 1: RESUMEN EJECUTIVO ---
+    # --- PESTAÑA 1: RESUMEN FINANCIERO ---
     ws_summary.append([])
     ws_summary.append(["SISTEMA DE CONTROL DE INVENTARIO - PAPICHIS"])
     ws_summary.cell(row=2, column=2).font = font_title
     ws_summary.append([])
-    ws_summary.append(["", "PANEL DE CONTROL GENERAL (KPIs)"])
+    ws_summary.append(["", "ESTADOS GENERALES Y PROYECCIÓN DE FLUJO"])
     ws_summary.cell(row=4, column=2).font = Font(name="Calibri", size=11, bold=True)
     ws_summary.cell(row=4, column=2).fill = PatternFill(start_color="EAEAEA", end_color="EAEAEA", fill_type="solid")
     ws_summary.append([])
     
-    ws_summary.cell(row=6, column=2, value="Métrica de Control").font = font_bold
+    ws_summary.cell(row=6, column=2, value="Indicador Financiero / Logístico").font = font_bold
     ws_summary.cell(row=6, column=2).fill = fill_sub_header
     ws_summary.cell(row=6, column=2).border = border_thin
     ws_summary.cell(row=6, column=3, value="Valor").font = font_bold
@@ -282,9 +339,10 @@ def descargar_excel():
     ws_summary.cell(row=6, column=3).alignment = Alignment(horizontal='center')
 
     metrics = [
-        ("Total de Items Registrados", len(productos_bd)),
-        ("Total Unidades en Almacén", suma_total_stock),
-        ("Productos con Stock Crítico (<=5)", items_criticos)
+        ("Modelos Únicos Registrados", len(productos_bd)),
+        ("Volumen Total de Unidades en Almacén", suma_total_stock),
+        ("Capital Estimado de Retorno (Venta Total)", suma_total_dinero),
+        ("Alertas de Abastecimiento Crítico (<=5)", items_criticos)
     ]
 
     for r_idx, (m_name, m_val) in enumerate(metrics, 7):
@@ -295,15 +353,19 @@ def descargar_excel():
         c_val = ws_summary.cell(row=r_idx, column=3, value=m_val)
         c_val.font = font_bold
         c_val.border = border_thin
-        c_val.alignment = Alignment(horizontal='center')
         
-        if r_idx == 9 and items_criticos > 0:
+        if r_idx == 9: # Formato moneda para el capital
+            c_val.number_format = '$#,##0.00'
+            c_val.alignment = Alignment(horizontal='right')
+        else:
+            c_val.alignment = Alignment(horizontal='center')
+            
+        if r_idx == 10 and items_criticos > 0:
             c_name.fill = fill_alert
             c_name.font = font_alert
             c_val.fill = fill_alert
             c_val.font = font_alert
 
-    # Auto-ajustar columnas
     for ws in [ws_summary, ws_data]:
         for col in ws.columns:
             max_len = 0
@@ -314,10 +376,9 @@ def descargar_excel():
             ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
             
     ws_summary.column_dimensions['A'].width = 3
-    ws_summary.column_dimensions['B'].width = 35
-    ws_summary.column_dimensions['C'].width = 15
+    ws_summary.column_dimensions['B'].width = 40
+    ws_summary.column_dimensions['C'].width = 20
 
-    # Guardar en memoria de intercambio y enviar el archivo al navegador
     excel_stream = io.BytesIO()
     wb.save(excel_stream)
     excel_stream.seek(0)
@@ -326,7 +387,7 @@ def descargar_excel():
         excel_stream,
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         as_attachment=True,
-        download_name=f'Reporte_Inventario_Papichis_{datetime.now().strftime("%d_%m_%Y")}.xlsx'
+        download_name=f'Reporte_Financiero_Papichis_{datetime.now().strftime("%d_%m_%Y")}.xlsx'
     )
 
 @app.route('/admin/logout')
