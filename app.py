@@ -114,18 +114,18 @@ def admin_dashboard():
 
     conn = sqlite3.connect('inventario_papichis.db')
     cursor = conn.cursor()
-    # Traemos también los precios que agregamos
-    cursor.execute("SELECT nombre_producto, categoria, cantidad_actual, precio_venta, precio_compra, ultima_actualizacion FROM productos ORDER BY cantidad_actual ASC")
+    # Incluimos el ID al inicio de la consulta para poder usarlo en los formularios mutables
+    cursor.execute("SELECT id, nombre_producto, categoria, cantidad_actual, precio_venta, precio_compra, ultima_actualizacion FROM productos ORDER BY cantidad_actual ASC")
     datos = cursor.fetchall()
     conn.close()
 
     # --- ZONA DE CÁLCULOS ANALÍTICOS (PRO) ---
     total_items = len(datos)
-    total_unidades = sum(p[2] for p in datos)
-    items_criticos = sum(1 for p in datos if p[2] <= 5)
+    total_unidades = sum(p[3] for p in datos)
+    items_criticos = sum(1 for p in datos if p[3] <= 5)
     
     # Cálculo del valor total de la mercancía basada en el precio de venta
-    valor_total_mercancia = sum(p[2] * p[3] for p in datos)
+    valor_total_mercancia = sum(p[3] * p[4] for p in datos)
 
     html = """
     <!DOCTYPE html>
@@ -150,10 +150,16 @@ def admin_dashboard():
             .kpi-valor { font-size: 24px; font-weight: bold; color: #222; }
             
             table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 8px; overflow: hidden; }
-            th, td { padding: 14px; text-align: left; border-bottom: 1px solid #eee; }
+            th, td { padding: 14px; text-align: left; border-bottom: 1px solid #eee; vertical-align: middle; }
             th { background-color: #1f497d; color: white; font-weight: bold; }
             tr:hover { background-color: #f1f3f5; }
             .agotado { background-color: #ffe6e6; color: #cc0000; font-weight: bold; }
+            
+            /* Estilo para el miniformulario de edición de precios */
+            .form-precio { display: flex; gap: 4px; align-items: center; margin: 0; }
+            .input-precio { width: 75px; padding: 6px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; text-align: center; }
+            .btn-guardar-precio { background: #28a745; color: white; border: none; padding: 6px 10px; border-radius: 4px; font-weight: bold; cursor: pointer; }
+            .btn-guardar-precio:hover { background: #218838; }
         </style>
     </head>
     <body>
@@ -196,13 +202,20 @@ def admin_dashboard():
             </thead>
             <tbody>
                 {% for producto in datos %}
-                <tr class="{% if producto[2] <= 5 %}agotado{% endif %}">
-                    <td>{{ producto[0] }}</td>
+                <tr class="{% if producto[3] <= 5 %}agotado{% endif %}">
                     <td>{{ producto[1] }}</td>
-                    <td>{{ producto[2] }} uds</td>
-                    <td>${{ "{:,.2f}".format(producto[3]) }}</td>
-                    <td>${{ "{:,.2f}".format(producto[2] * producto[3]) }}</td>
-                    <td>{{ producto[5] or 'No revisado aún' }}</td>
+                    <td>{{ producto[2] }}</td>
+                    <td>{{ producto[3] }} uds</td>
+                    <td>
+                        <form action="/admin/actualizar_precio" method="POST" class="form-precio">
+                            <input type="hidden" name="id_producto" value="{{ producto[0] }}">
+                            <span style="color: #28a745; font-weight: bold;">$</span>
+                            <input type="number" name="nuevo_precio" value="{{ producto[4] }}" step="0.01" min="0" class="input-precio">
+                            <button type="submit" class="btn-guardar-precio" title="Guardar Precio">✓</button>
+                        </form>
+                    </td>
+                    <td>${{ "{:,.2f}".format(producto[3] * producto[4]) }}</td>
+                    <td>{{ producto[6] or 'No revisado aún' }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -218,6 +231,29 @@ def admin_dashboard():
     return render_template_string(html, datos=datos, total_items=total_items, total_unidades=total_unidades, valor_total_mercancia=valor_total_mercancia, items_criticos=items_criticos)
 
 
+# --- NUEVA RUTA: ACTUALIZACIÓN DE PRECIOS DESDE EL DASHBOARD ---
+
+@app.route('/admin/actualizar_precio', methods=['POST'])
+def admin_actualizar_precio():
+    if not session.get('admin_autenticado'):
+        return redirect(url_for('admin_login'))
+        
+    producto_id = request.form['id_producto']
+    nuevo_precio = request.form['nuevo_precio']
+    fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    conn = sqlite3.connect('inventario_papichis.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE productos 
+        SET precio_venta = ?, ultima_actualizacion = ? 
+        WHERE id = ?
+    ''', (nuevo_precio, fecha_actual, producto_id))
+    conn.commit()
+    conn.close()
+    return redirect(url_for('admin_dashboard'))
+
+
 # --- RUTA DE GENERACIÓN EN TIEMPO REAL DEL EXCEL FINANCIERO ---
 
 @app.route('/descargar_excel')
@@ -227,7 +263,6 @@ def descargar_excel():
 
     conn = sqlite3.connect('inventario_papichis.db')
     cursor = conn.cursor()
-    # Traemos los nuevos campos financieros para el reporte
     cursor.execute("SELECT id, categoria, subcategoria, nombre_producto, cantidad_actual, precio_venta, precio_compra, ultima_actualizacion FROM productos")
     productos_bd = cursor.fetchall()
     conn.close()
@@ -291,7 +326,6 @@ def descargar_excel():
             
             cell.alignment = Alignment(horizontal='center' if col_idx in [1,5,6,7,8,9] else 'left', vertical='center')
             
-            # Formatos numéricos de moneda y millares
             if col_idx == 5:
                 cell.number_format = '#,##0'
             elif col_idx in [6, 7]:
@@ -305,13 +339,11 @@ def descargar_excel():
     suma_total_dinero = sum(f[4] * f[5] for f in productos_bd)
     items_criticos = sum(1 for f in productos_bd if f[4] <= 5)
     
-    # Celda total stock
     t_stock = ws_data.cell(row=tot_row, column=5, value=suma_total_stock)
     t_stock.font = font_bold
     t_stock.border = border_total
     t_stock.number_format = '#,##0'
     
-    # Celda total dinero
     t_dinero = ws_data.cell(row=tot_row, column=7, value=suma_total_dinero)
     t_dinero.font = font_bold
     t_dinero.border = border_total
@@ -354,7 +386,7 @@ def descargar_excel():
         c_val.font = font_bold
         c_val.border = border_thin
         
-        if r_idx == 9: # Formato moneda para el capital
+        if r_idx == 9:
             c_val.number_format = '$#,##0.00'
             c_val.alignment = Alignment(horizontal='right')
         else:
