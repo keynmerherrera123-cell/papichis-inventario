@@ -117,18 +117,24 @@ def admin_dashboard():
     cursor.execute("SELECT id, nombre_producto, categoria, cantidad_actual, precio_venta, precio_compra, ultima_actualizacion FROM productos ORDER BY cantidad_actual ASC")
     datos_brutos = cursor.fetchall()
     conn.close()
-
-    # --- LIMPIEZA DE DATOS (ANTI ERROR 500) ---
+# --- LIMPIEZA DE DATOS (ANTI ERROR 500) ---
     datos = []
     for p in datos_brutos:
         id_prod, nombre, cat, cant, p_venta, p_compra, ult_act = p
         
         cant = int(cant) if cant else 0
-        # Forzar a que el precio sea decimal. Si falla (está vacío o es texto), poner 0.0
+        
+        # Forzar a que el precio de venta sea decimal
         try:
             p_venta = float(p_venta) if p_venta else 0.0
         except ValueError:
             p_venta = 0.0
+            
+        # NUEVO: Limpiar el precio de compra para evitar errores
+        try:
+            p_compra = float(p_compra) if p_compra else 0.0
+        except ValueError:
+            p_compra = 0.0
             
         datos.append((id_prod, nombre, cat, cant, p_venta, p_compra, ult_act))
 
@@ -137,7 +143,10 @@ def admin_dashboard():
     total_unidades = sum(p[3] for p in datos)
     items_criticos = sum(1 for p in datos if p[3] <= 5)
     valor_total_mercancia = sum(p[3] * p[4] for p in datos)
-
+    
+    # NUEVO: Cálculo automático de la Inversión (Cantidad * Precio Compra)
+    inversion_total = sum(p[3] * p[5] for p in datos)
+   
     html = """
     <!DOCTYPE html>
     <html>
@@ -190,9 +199,16 @@ def admin_dashboard():
                 <div class="kpi-titulo">Valor Estimado de Venta</div>
                 <div class="kpi-valor">${{ "{:,.2f}".format(valor_total_mercancia) }}</div>
             </div>
+            
+            <!-- NUEVA TARJETA: INVERSIÓN TOTAL -->
+            <div class="tarjeta-kpi" style="border-left-color: #ffc107;">
+                <div class="kpi-titulo">Precio Stock Invertido</div>
+                <div class="kpi-valor">${{ "{:,.2f}".format(inversion_total) }}</div>
+            </div>
+            
             <div class="tarjeta-kpi alerta">
                 <div class="kpi-titulo">Alertas de Reposición</div>
-                <div class="kpi-valor" style="color: {% if items_criticos > 0 %}#dc3545{% else %}\#222{% endif %};">{{ items_criticos }}</div>
+                <div class="kpi-valor" style="color: {% if items_criticos > 0 %}#dc3545{% else %}#222{% endif %};">{{ items_criticos }}</div>
             </div>
         </div>
 
@@ -237,8 +253,7 @@ def admin_dashboard():
     </body>
     </html>
     """
-    return render_template_string(html, datos=datos, total_items=total_items, total_unidades=total_unidades, valor_total_mercancia=valor_total_mercancia, items_criticos=items_criticos)
-
+    return render_template_string(html, datos=datos, total_items=total_items, total_unidades=total_unidades, valor_total_mercancia=valor_total_mercancia, inversion_total=inversion_total, items_criticos=items_criticos)
 
 # --- NUEVA RUTA: ACTUALIZACIÓN DE PRECIOS DESDE EL DASHBOARD ---
 
